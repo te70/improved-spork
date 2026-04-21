@@ -98,6 +98,8 @@ jobs:
 
       - name: Install Bandit
         run: pip install bandit>=1.8.0 bandit-sarif-formatter
+        # Verify installation
+        bandit-sarif-formatter --version || (echo "ERROR: bandit-sarif-formatter not found" && exit 1)
 
       - name: Run Bandit SAST scan
         run: |
@@ -122,7 +124,13 @@ jobs:
             --exit-zero | tee bandit-results.txt
 
       - name: Convert Bandit JSON to SARIF
-        run: bandit-sarif-formatter -i bandit-report.json -o bandit-report.sarif
+        run: |
+          if [ -f bandit-report.json ]; then
+            bandit-sarif-formatter -i bandit-report.json -o bandit-report.sarif
+          else
+            echo "WARNING: bandit-report.json not found, skipping SARIF conversion"
+            exit 1
+          fi
 
       - name: Display Bandit findings
         run: |
