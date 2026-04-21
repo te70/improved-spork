@@ -98,8 +98,8 @@ jobs:
 
       - name: Install Bandit
         run: |
-          pip install --upgrade pip
-          pip install bandit bandit-sarif-formatter
+          python -m pip install --upgrade pip
+          python -m pip install bandit bandit-sarif-formatter
 
       - name: Run Bandit SAST scan
         run: |
@@ -110,7 +110,7 @@ jobs:
             --output bandit-report.json \
             --severity-level medium \
             --confidence-level medium \
-            --exit-zero    # Don't fail here — let the summary stage decide
+            --exit-zero   
         continue-on-error: true
 
       - name: Run Bandit for human-readable output
@@ -121,12 +121,12 @@ jobs:
             --format screen \
             --severity-level medium \
             --confidence-level medium \
-            --exit-zero | tee bandit-results.txt
+            --exit-zero
 
       - name: Convert Bandit JSON to SARIF
         run: |
 
-          python -m bandit_sarif_formatter \
+          bandit_sarif_formatter \
             -i bandit-report.json \
             -o bandit-report.sarif
 
