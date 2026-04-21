@@ -24,8 +24,8 @@ severity = "HIGH"
 # Files to always ignore
 paths = [
     ".gitleaks.toml",
-    "*.md",
-    "tests/",
+    ".*\\.md$",
+    "tests/.*",
 ]
 
 # Commits to ignore (add baseline commit hash here if starting on existing repo)
