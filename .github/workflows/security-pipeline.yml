@@ -97,7 +97,11 @@ jobs:
           cache: 'pip'
 
       - name: Install Bandit
-        run: pip install bandit>=1.8.0 "bandit-sarif-formatter>=0.9.0" --upgrade
+        run: |
+          pip install --upgrade pip
+          pip install bandit>=1.8.0 "bandit-sarif-formatter>=0.9.0"
+          # Verify installation
+          which bandit-sarif-formatter || pip show bandit-sarif-formatter
 
       - name: Run Bandit SAST scan
         run: |
@@ -123,6 +127,9 @@ jobs:
 
       - name: Convert Bandit JSON to SARIF
         run: |
+
+          pip install --force-reinstall --no-cache-dir "bandit-sarif-formatter>=0.9.0"
+          
           if [ -f bandit-report.json ]; then
             bandit-sarif-formatter -i bandit-report.json -o bandit-report.sarif
           else
