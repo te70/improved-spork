@@ -124,7 +124,7 @@ jobs:
 
       - name: Convert Bandit JSON to SARIF
         run: |
-           python <<EOF
+          python <<EOF
             import json
 
             with open("bandit-report.json") as f:
@@ -157,7 +157,7 @@ jobs:
 
             with open("bandit-report.sarif", "w") as f:
                 json.dump(sarif, f, indent=2)
-            EOF
+          EOF
 
       - name: Display Bandit findings
         run: |
