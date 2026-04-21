@@ -125,38 +125,38 @@ jobs:
       - name: Convert Bandit JSON to SARIF
         run: |
           python <<EOF
-            import json
+          import json
 
-            with open("bandit-report.json") as f:
-                data = json.load(f)
+          with open("bandit-report.json") as f:
+              data = json.load(f)
 
-            sarif = {
-                "version": "2.1.0",
-                "runs": [{
-                    "tool": {
-                        "driver": {
-                            "name": "Bandit",
-                            "rules": []
-                        }
-                    },
-                    "results": []
-                }]
-            }
+          sarif = {
+              "version": "2.1.0",
+              "runs": [{
+                  "tool": {
+                      "driver": {
+                          "name": "Bandit",
+                          "rules": []
+                      }
+                  },
+                  "results": []
+              }]
+          }
 
-            for issue in data.get("results", []):
-                sarif["runs"][0]["results"].append({
-                    "ruleId": issue.get("test_id"),
-                    "message": {"text": issue.get("issue_text")},
-                    "locations": [{
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": issue.get("filename")},
-                            "region": {"startLine": issue.get("line_number")}
-                        }
-                    }]
-                })
+          for issue in data.get("results", []):
+              sarif["runs"][0]["results"].append({
+                  "ruleId": issue.get("test_id"),
+                  "message": {"text": issue.get("issue_text")},
+                  "locations": [{
+                      "physicalLocation": {
+                          "artifactLocation": {"uri": issue.get("filename")},
+                          "region": {"startLine": issue.get("line_number")}
+                      }
+                  }]
+              })
 
-            with open("bandit-report.sarif", "w") as f:
-                json.dump(sarif, f, indent=2)
+          with open("bandit-report.sarif", "w") as f:
+              json.dump(sarif, f, indent=2)
           EOF
 
       - name: Display Bandit findings

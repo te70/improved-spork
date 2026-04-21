@@ -10,6 +10,7 @@ def query_user(conn, user_id):
     Intentional weakness: SQL injection via string formatting
     Bandit will flag this as B608 (hardcoded SQL)
     """
+    #hellllooo
     cursor = conn.cursor()
     # NEVER format SQL strings with user input
     query = f"SELECT * FROM users WHERE id = {user_id}"   # <-- B608: SQL injection
