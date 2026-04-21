@@ -120,7 +120,7 @@ jobs:
             --format screen \
             --severity-level medium \
             --confidence-level medium \
-            --exit-zero
+            --exit-zero | tee bandit-results.txt
 
       - name: Convert Bandit JSON to SARIF
         run: |
