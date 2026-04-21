@@ -97,7 +97,7 @@ jobs:
           cache: 'pip'
 
       - name: Install Bandit
-        run: pip install bandit>=1.8.0 bandit-sarif-formatter
+        run: pip install bandit>=1.8.0 "bandit-sarif-formatter>=0.9.0" --upgrade
 
       - name: Run Bandit SAST scan
         run: |
