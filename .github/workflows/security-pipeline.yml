@@ -98,7 +98,7 @@ jobs:
       - name: Install Bandit
         run: |
           python -m pip install --upgrade pip
-          python -m pip install bandit bandit-sarif-formatter
+          python -m pip install bandit 
 
       - name: Run Bandit SAST scan
         run: |
@@ -124,9 +124,7 @@ jobs:
 
       - name: Convert Bandit JSON to SARIF
         run: |
-          $HOME/.local/bin/bandit-sarif-formatter \
-            -i bandit-report.json \
-            -o bandit-report.sarif 
+          python convert_bandit_to_sarif.py
 
       - name: Display Bandit findings
         run: |

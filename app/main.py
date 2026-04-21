@@ -16,7 +16,7 @@ MPESA_API_KEY = "sk_test_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
 # Intentional Gitleaks error 2: Hardcoded Database Password
 # Gitleaks should flag this
-DATABASE_URL = "postgresql://user:supersecretpassword@localhost:5432/mydb"
+DATABASE_URL = "postgresql://user:secretpassword@localhost:5432/mydb"
 
 @app.route('/')
 def index():
