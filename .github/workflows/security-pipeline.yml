@@ -99,9 +99,7 @@ jobs:
       - name: Install Bandit
         run: |
           pip install --upgrade pip
-          pip install bandit>=1.8.0 "bandit-sarif-formatter>=0.10.0"
-          # Verify installation
-          which bandit-sarif-formatter || pip show bandit-sarif-formatter
+          pip install bandit bandit-sarif-formatter
 
       - name: Run Bandit SAST scan
         run: |
@@ -128,24 +126,9 @@ jobs:
       - name: Convert Bandit JSON to SARIF
         run: |
 
-          if [ -f bandit-report.json ]; then
-            python3 << 'EOF'
-          import json
-          from bandit_sarif_formatter.formatter import BanditSarifFormatter
-
-          with open('bandit-report.json', 'r') as f:
-              bandit_data = json.load(f)
-
-          formatter = BanditSarifFormatter()
-          sarif_output = formatter.format(bandit_data)
-
-          with open('bandit-report.sarif', 'w') as f:
-              json.dump(sarif_output, f)
-          EOF
-              else
-                echo "WARNING: bandit-report.json not found, skipping SARIF conversion"
-                exit 1
-              fi
+          bandit-sarif-formatter \
+            -i bandit-report.json \
+            -o bandit-report.sarif
 
       - name: Display Bandit findings
         run: |
