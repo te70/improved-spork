@@ -48,17 +48,24 @@ jobs:
             --report-path gitleaks-report.sarif
             --verbose
 
-      - name: Check for SARIF file existence
-        id: check_sarif
+      - name: Check for Gitleaks SARIF report existence
+        id: check_sarif_file
         run: |
-          SARIF_FILE="gitleaks-results.sarif" # Adjust this if your Gitleaks output file name is different
+          SARIF_FILE="gitleaks-report.sarif" # This must match the --report-path in the Gitleaks step
           if [ -f "$SARIF_FILE" ]; then
             echo "sarif_exists=true" >> "$GITHUB_OUTPUT"
-            echo "SARIF file found: $SARIF_FILE"
+            echo "Gitleaks SARIF report found: $SARIF_FILE"
           else
             echo "sarif_exists=false" >> "$GITHUB_OUTPUT"
-            echo "SARIF file not found. No leaks detected or Gitleaks did not produce a report."
+            echo "Gitleaks SARIF report not found. This is expected if no leaks were detected."
           fi
+
+      - name: Upload Gitleaks SARIF
+        if: always()    # Upload even on failure so findings are visible
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks-report.sarif
+          category: secrets-detection
 
       - name: Upload Gitleaks report as artifact
         if: always()
