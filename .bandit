@@ -1,21 +1,21 @@
 ---
-[bandit]
 # Bandit SAST configuration
 # Skip test files — vulnerabilities in tests are acceptable
 exclude_dirs: 
-    - tests
-    - venv
-    - .venv
-    - build
-    - dist
+  - tests
+  - venv
+  - .venv
+  - build
+  - dist
 
 # Severity levels to report: LOW, MEDIUM, HIGH
 # Set to MEDIUM to reduce noise while catching real issues
-severity = MEDIUM
+severity: MEDIUM
 
 # Confidence levels: LOW, MEDIUM, HIGH
-confidence = MEDIUM
+confidence: MEDIUM
 
 # Tests to skip (with justification)
 # B101: assert_used — acceptable in test files
-skips = B101
+skips: 
+  - B101
