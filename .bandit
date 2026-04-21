@@ -1,3 +1,4 @@
+---
 [bandit]
 # Bandit SAST configuration
 # Skip test files — vulnerabilities in tests are acceptable
