@@ -98,8 +98,6 @@ jobs:
 
       - name: Install Bandit
         run: pip install bandit>=1.8.0 bandit-sarif-formatter
-        # Verify installation
-        bandit-sarif-formatter --version || (echo "ERROR: bandit-sarif-formatter not found" && exit 1)
 
       - name: Run Bandit SAST scan
         run: |
