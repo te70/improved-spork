@@ -83,8 +83,7 @@ jobs:
   sast-scanning:
     name: "🔍 SAST Scanning (Bandit)"
     runs-on: ubuntu-latest
-    needs: secrets-detection    # Only run if secrets check passes
-
+    needs: secrets-detection   # Run after secrets detection — if secrets are found, no need to waste time on SAST
     steps:
 
       - name: Checkout code
@@ -125,10 +124,9 @@ jobs:
 
       - name: Convert Bandit JSON to SARIF
         run: |
-
-          bandit_sarif_formatter \
+          $HOME/.local/bin/bandit-sarif-formatter \
             -i bandit-report.json \
-            -o bandit-report.sarif
+            -o bandit-report.sarif 
 
       - name: Display Bandit findings
         run: |
