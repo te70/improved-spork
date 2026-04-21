@@ -1,0 +1,51 @@
+name: Scheduled Security Scan
+
+on:
+  schedule:
+    # Run every Monday at 07:00 UTC
+    - cron: '0 7 * * 1'
+  workflow_dispatch:    # Allow manual trigger
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  weekly-dependency-scan:
+    name: "📅 Weekly Dependency Scan"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install scanning tools
+        run: pip install safety pip-audit
+
+      - name: Run full dependency audit
+        run: |
+          echo "=== Weekly Security Scan - $(date) ===" 
+          echo ""
+          echo "--- pip-audit ---"
+          pip-audit --requirement requirements.txt --format markdown || true
+          echo ""
+          echo "--- safety ---"
+          safety check --file requirements.txt || true
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-weekly.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-weekly.sarif
+          category: weekly-scan

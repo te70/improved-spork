@@ -1,0 +1,39 @@
+# Gitleaks configuration for secrets detection
+title = "DevSecOps Pipeline - Gitleaks Config"
+
+[extend]
+# Use the default ruleset as a base
+useDefault = true
+
+[[rules]]
+# Custom rule: detect any line with "password" followed by a value
+id = "password-assignment"
+description = "Potential password assignment"
+regex = '''(?i)(password|passwd|pwd)\s*[=:]\s*['""][^'""\s]{4,}['""]'''
+tags = ["secret", "password"]
+severity = "HIGH"
+
+[[rules]]
+id = "api-key-pattern"
+description = "Generic API key pattern"
+regex = '''(?i)(api[_-]?key|apikey)\s*[=:]\s*['""][a-zA-Z0-9\-_]{20,}['""]'''
+tags = ["secret", "api-key"]
+severity = "HIGH"
+
+[allowlist]
+# Files to always ignore
+paths = [
+    ".gitleaks.toml",
+    "*.md",
+    "tests/",
+]
+
+# Commits to ignore (add baseline commit hash here if starting on existing repo)
+commits = []
+
+# Specific strings to allow (false positives)
+regexes = [
+    "EXAMPLE_KEY",
+    "YOUR_KEY_HERE",
+    "placeholder",
+]

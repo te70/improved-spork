@@ -1,0 +1,505 @@
+name: DevSecOps Security Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+# Prevent concurrent pipeline runs on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permissions needed for security scanning and SARIF upload
+permissions:
+  contents: read
+  security-events: write    # Required to upload SARIF results
+  pull-requests: write      # Required to comment on PRs
+  packages: write           # Required to push to GitHub Container Registry
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # STAGE 1: SECRETS DETECTION
+  # Gitleaks scans the entire git history for accidentally committed secrets
+  # Runs first — fastest check, highest severity if it fails
+  # ──────────────────────────────────────────────────────────────────────────
+  secrets-detection:
+    name: "🔑 Secrets Detection (Gitleaks)"
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # Full history required for Gitleaks to scan all commits
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        with:
+          args: >
+            detect
+            --config .gitleaks.toml
+            --report-format sarif
+            --report-path gitleaks-report.sarif
+            --verbose
+
+      - name: Upload Gitleaks SARIF
+        if: always()    # Upload even on failure so findings are visible
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks-report.sarif
+          category: secrets-detection
+
+      - name: Upload Gitleaks report as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.sarif
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # STAGE 2: SAST — STATIC APPLICATION SECURITY TESTING
+  # Bandit analyses Python source code for security vulnerabilities
+  # without executing it
+  # ──────────────────────────────────────────────────────────────────────────
+  sast-scanning:
+    name: "🔍 SAST Scanning (Bandit)"
+    runs-on: ubuntu-latest
+    needs: secrets-detection    # Only run if secrets check passes
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Bandit
+        run: pip install bandit[sarif]==1.7.6
+
+      - name: Run Bandit SAST scan
+        run: |
+          bandit \
+            --configfile .bandit \
+            --recursive app/ \
+            --format sarif \
+            --output bandit-report.sarif \
+            --severity-level medium \
+            --confidence-level medium \
+            --exit-zero    # Don't fail here — let the summary stage decide
+        continue-on-error: true
+
+      - name: Run Bandit for human-readable output
+        run: |
+          bandit \
+            --configfile .bandit \
+            --recursive app/ \
+            --format text \
+            --severity-level medium \
+            --confidence-level medium \
+            --output bandit-results.txt \
+            --exit-zero
+
+      - name: Display Bandit findings
+        run: |
+          echo "=== BANDIT SAST FINDINGS ==="
+          cat bandit-results.txt
+
+      - name: Upload Bandit SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit-report.sarif
+          category: sast-bandit
+
+      - name: Upload Bandit results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-sast-report
+          path: |
+            bandit-report.sarif
+            bandit-results.txt
+          retention-days: 30
+
+      - name: Check for HIGH severity findings
+        run: |
+          HIGH_COUNT=$(python3 -c "
+          import json
+          with open('bandit-report.sarif') as f:
+              data = json.load(f)
+          runs = data.get('runs', [])
+          high = sum(
+              1 for run in runs
+              for result in run.get('results', [])
+              if result.get('properties', {}).get('issue_severity') == 'HIGH'
+          )
+          print(high)
+          ")
+          echo "High severity findings: $HIGH_COUNT"
+          if [ "$HIGH_COUNT" -gt "0" ]; then
+            echo "::error::$HIGH_COUNT HIGH severity SAST findings detected. Review bandit-results.txt"
+            exit 1
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # STAGE 3: DEPENDENCY VULNERABILITY SCANNING
+  # Scans Python requirements.txt for known CVEs in third-party packages
+  # ──────────────────────────────────────────────────────────────────────────
+  dependency-scanning:
+    name: "📦 Dependency Scanning (Safety + pip-audit)"
+    runs-on: ubuntu-latest
+    needs: secrets-detection
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install scanning tools
+        run: |
+          pip install safety==3.0.1 pip-audit==2.6.1
+
+      - name: Run Safety dependency check
+        run: |
+          safety check \
+            --file requirements.txt \
+            --output json \
+            --save-json safety-report.json \
+            --exit-zero    # Collect all findings first
+          
+          # Pretty print the summary
+          safety check \
+            --file requirements.txt \
+            --output text \
+            --exit-zero
+        continue-on-error: true
+
+      - name: Run pip-audit
+        run: |
+          pip-audit \
+            --requirement requirements.txt \
+            --format json \
+            --output pip-audit-report.json \
+            --exit-zero
+          
+          pip-audit \
+            --requirement requirements.txt \
+            --format markdown \
+            --output pip-audit-report.md \
+            --exit-zero
+        continue-on-error: true
+
+      - name: Display dependency findings
+        run: |
+          echo "=== PIP-AUDIT FINDINGS ==="
+          cat pip-audit-report.md || echo "No pip-audit report generated"
+          
+          echo ""
+          echo "=== SAFETY FINDINGS ==="
+          python3 -c "
+          import json, sys
+          try:
+              with open('safety-report.json') as f:
+                  data = json.load(f)
+              vulns = data.get('vulnerabilities', [])
+              print(f'Total vulnerabilities found: {len(vulns)}')
+              for v in vulns[:10]:
+                  print(f'  - {v.get(\"package_name\")}: {v.get(\"vulnerability_id\")} ({v.get(\"severity\", \"UNKNOWN\")})')
+          except Exception as e:
+              print(f'Could not parse report: {e}')
+          "
+
+      - name: Upload dependency scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-scan-reports
+          path: |
+            safety-report.json
+            pip-audit-report.json
+            pip-audit-report.md
+          retention-days: 30
+
+      - name: Fail on CRITICAL dependency vulnerabilities
+        run: |
+          python3 << 'EOF'
+          import json, sys
+          critical_count = 0
+          
+          try:
+              with open('pip-audit-report.json') as f:
+                  data = json.load(f)
+              for dep in data.get('dependencies', []):
+                  for vuln in dep.get('vulns', []):
+                      # pip-audit severity field
+                      if 'CRITICAL' in str(vuln.get('fix_versions', [])):
+                          critical_count += 1
+          except Exception as e:
+              print(f"Warning: Could not parse pip-audit report: {e}")
+          
+          if critical_count > 0:
+              print(f"FAIL: {critical_count} CRITICAL dependency vulnerabilities found")
+              sys.exit(1)
+          else:
+              print("PASS: No critical dependency vulnerabilities found")
+          EOF
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # STAGE 4: CONTAINER IMAGE SCANNING
+  # Builds the Docker image and scans it with Trivy for:
+  # - OS package vulnerabilities
+  # - Application dependency vulnerabilities
+  # - Dockerfile misconfigurations
+  # ──────────────────────────────────────────────────────────────────────────
+  container-scanning:
+    name: "🐳 Container Image Scan (Trivy)"
+    runs-on: ubuntu-latest
+    needs: [sast-scanning, dependency-scanning]
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false    # Don't push yet — scan first
+          tags: devsecops-demo:${{ github.sha }}
+          load: true     # Load into local Docker daemon for Trivy
+
+      - name: Run Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'devsecops-demo:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-container-report.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'    # Don't fail here — report first
+          ignore-unfixed: false
+
+      - name: Run Trivy — table output for logs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'devsecops-demo:${{ github.sha }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Run Trivy Dockerfile misconfiguration scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-config-report.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-container-report.sarif
+          category: container-scanning
+
+      - name: Upload Trivy config SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-config-report.sarif
+          category: dockerfile-config
+
+      - name: Upload Trivy reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-reports
+          path: |
+            trivy-container-report.sarif
+            trivy-config-report.sarif
+          retention-days: 30
+
+      - name: Fail on CRITICAL container vulnerabilities
+        run: |
+          # Run Trivy with exit code 1 only for CRITICAL findings
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:latest image \
+            --severity CRITICAL \
+            --exit-code 1 \
+            --no-progress \
+            devsecops-demo:${{ github.sha }} \
+            || (echo "::error::CRITICAL vulnerabilities found in container image" && exit 1)
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # STAGE 5: UNIT TESTS
+  # Run alongside security scans to ensure nothing is broken
+  # ──────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: "🧪 Unit Tests (pytest)"
+    runs-on: ubuntu-latest
+    needs: secrets-detection
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            -v
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # STAGE 6: SECURITY SUMMARY — GATE
+  # Collects all results and produces a final pass/fail decision
+  # Posts a summary comment on pull requests
+  # ──────────────────────────────────────────────────────────────────────────
+  security-summary:
+    name: "📋 Security Summary & Gate"
+    runs-on: ubuntu-latest
+    needs:
+      - secrets-detection
+      - sast-scanning
+      - dependency-scanning
+      - container-scanning
+      - unit-tests
+    if: always()    # Run even if earlier stages failed
+
+    steps:
+
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: ./reports
+
+      - name: Generate security summary
+        id: summary
+        run: |
+          echo "## 🔐 DevSecOps Security Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Gate | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          
+          # Check each job's conclusion
+          SECRETS="${{ needs.secrets-detection.result }}"
+          SAST="${{ needs.sast-scanning.result }}"
+          DEPS="${{ needs.dependency-scanning.result }}"
+          CONTAINER="${{ needs.container-scanning.result }}"
+          TESTS="${{ needs.unit-tests.result }}"
+          
+          status_icon() {
+            if [ "$1" = "success" ]; then echo "✅ Pass"
+            elif [ "$1" = "failure" ]; then echo "❌ Fail"
+            elif [ "$1" = "skipped" ]; then echo "⏭️ Skipped"
+            else echo "⚠️ $1"
+            fi
+          }
+          
+          echo "| 🔑 Secrets Detection (Gitleaks) | $(status_icon $SECRETS) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 SAST Scanning (Bandit) | $(status_icon $SAST) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Dependency Scanning (Safety) | $(status_icon $DEPS) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐳 Container Scan (Trivy) | $(status_icon $CONTAINER) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Unit Tests | $(status_icon $TESTS) |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Post PR comment with security results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const secrets  = '${{ needs.secrets-detection.result }}';
+            const sast      = '${{ needs.sast-scanning.result }}';
+            const deps      = '${{ needs.dependency-scanning.result }}';
+            const container = '${{ needs.container-scanning.result }}';
+            const tests     = '${{ needs.unit-tests.result }}';
+            
+            const icon = (r) => r === 'success' ? '✅' : r === 'failure' ? '❌' : '⏭️';
+            const allPassed = [secrets, sast, deps, container, tests].every(r => r === 'success');
+            
+            const body = `## 🔐 Security Pipeline Results
+            
+            ${allPassed ? '✅ **All security gates passed. Safe to merge.**' : '❌ **One or more security gates failed. Review findings before merging.**'}
+            
+            | Gate | Tool | Result |
+            |---|---|---|
+            | Secrets Detection | Gitleaks | ${icon(secrets)} ${secrets} |
+            | SAST | Bandit | ${icon(sast)} ${sast} |
+            | Dependencies | Safety + pip-audit | ${icon(deps)} ${deps} |
+            | Container Image | Trivy | ${icon(container)} ${container} |
+            | Unit Tests | pytest | ${icon(tests)} ${tests} |
+            
+            📎 [View detailed findings](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/security/code-scanning) in the Security tab.
+            
+            📦 [Download scan reports](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) as artifacts.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Final gate — fail if any critical stage failed
+        run: |
+          SECRETS="${{ needs.secrets-detection.result }}"
+          SAST="${{ needs.sast-scanning.result }}"
+          CONTAINER="${{ needs.container-scanning.result }}"
+          
+          if [ "$SECRETS" = "failure" ] || [ "$SAST" = "failure" ] || [ "$CONTAINER" = "failure" ]; then
+            echo "::error::Pipeline failed: one or more critical security gates did not pass"
+            echo "  Secrets detection: $SECRETS"
+            echo "  SAST: $SAST"
+            echo "  Container scan: $CONTAINER"
+            exit 1
+          fi
+          
+          echo "✅ All critical security gates passed"

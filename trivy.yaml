@@ -1,0 +1,30 @@
+# Trivy container and filesystem scanning configuration
+
+# Severity levels to report
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+
+# Output format
+format: sarif
+
+# Exit code: 1 = fail pipeline if CRITICAL vulnerabilities found
+exit-code: 1
+
+# Vulnerability types to scan
+vulnerability:
+  type:
+    - os        # OS package vulnerabilities
+    - library   # Application library vulnerabilities
+
+# Ignore unfixed vulnerabilities (optional — reduces noise)
+ignore-unfixed: false
+
+# Cache configuration
+cache:
+  dir: /tmp/trivy-cache
+
+# Skip specific vulnerability IDs (with documented justification)
+# Format: CVE-YYYY-NNNNN
+ignore-policy: ""
