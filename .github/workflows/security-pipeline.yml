@@ -126,7 +126,7 @@ jobs:
       - name: Convert Bandit JSON to SARIF
         run: |
 
-          bandit-sarif-formatter \
+          python -m bandit-sarif-formatter \
             -i bandit-report.json \
             -o bandit-report.sarif
 
